@@ -1,3 +1,6 @@
+	list P = 16F747
+	title "Case Study 3"
+	
 #include <P16F747.INC>
 
 	__CONFIG _CONFIG1, _FOSC_HS & _CP_OFF & _DEBUG_OFF & _VBOR_2_0 & _BOREN_0 & _MCLR_ON & _PWRTE_ON & _WDT_OFF
@@ -10,14 +13,12 @@ Timer2 equ 25h
 Timer3 equ 26h
 Timer equ 27h
 Octal equ 30h		    ; Octal switch register
-Mode equ 31h		    ; Mode register
+Mode equ 31h		    ; Mode register to set Mode
     
     org 00h		    ; interrupt vector
     goto SwitchCheck	    ; jump to interrupt service routine (dummy)
-    
     org 04h		    ; interrupt vector
     goto isrService	    ; jump to interrupt service routine (dummy)
-    
     org 15h
 
 SwitchCheck
@@ -26,37 +27,73 @@ SwitchCheck
 initPort
     clrf PORTB               ; Clear PORTB
     clrf PORTC               ; Clear PORTC
+    clrf PORTD		    ; clear PORTD
     
-    bcf STATUS, RP0          ; Switch to Bank 1 for TRIS registers
-    clrf TRISB               ; Set all PORTB as output
-    movlw 0xFF               ; Set all pins of PORTC as input (for button presses)
+    clrf State		    ; clear STATE register
+    
+    bsf STATUS, RP0          ; Set RP0 in STATUS register to 1 to select Bank 1
+    clrf TRISB               ; Configure PORTB as all outputs (LEDs)
+    movlw B'11111111'        ; Configure PORTC as all inputs (buttons)
     movwf TRISC
-    movlw 0x00               ; Set all pins of PORTD as output (for transistor control)
+    movlw B'00111000'	    ; Configure PORTD as all outputs
     movwf TRISD
+    movlw B'00001110'        ; Configure RA0 in ADCON1 as analog, else digital
+    movwf ADCON1
     bcf STATUS, RP0          ; Switch back to Bank 0
     return
 
-setMode			; 
-    
 waitPress 
-    btfsc PORTC, 0           ; Check if green button is pressed (active low)
-    goto GreenPress
-    btfsc PORTC, 1           ; Check if red button is pressed (active low)
-    goto RedPress
-    goto waitPress           ; No button press detected, loop back
-
-    ; Handle green button press
+    btfsc PORTC, 0		; check if green button is pressed (bit 0 cleared)
+    goto GreenPress		; if not pressed, goto GreenPress
+    btfsc PORTC, 1		; check if red button is pressed (bit 1 cleared)
+    goto RedPress		; if not, goto RedPress
+    goto waitPress		; if neither, loop and wait for button press
+    
 GreenPress
-    call SwitchDelay          ; Debounce delay
-    btfss PORTC, 0           ; Check if green button is still pressed
-    goto RedPress            ; If not, check red button
+    call SwitchDelay		; debounce delay
+    btfss PORTC, 0		; check if green button is still pressed
+    goto waitPress		; noise - return to waitPress
+    
+setMode
+    clrf Mode			; clear MODE
+    
+    xorlw D'1'			; 
+    btfsc STATUS,Z
+    goto ModeOne
+    movf Octal,W
+    
+    xorlw D'2'
+    btfsc STATUS,Z
+    goto ModeTwo
+    movf Octal,W
+    
+    xorlw D'3'
+    btfsc STATUS,Z
+    goto ModeThree
+    movf Octal,W
+    
+    xorlw D'4'
+    btfsc STATUS,Z
+    goto ModeFour
+    
+ModeOne
+    bsf Mode,1		    ; initialize Mode 1
+    goto waitPress
 
-    ; Turn off the transistor (active high control assumed)
-TransistorOff
-    clrf PORTD               ; Clear PORTD to turn off the transistor
-    goto waitPress           ; Return to wait for button press
+ModeTwo
+    bsf Mode,2
+    goto waitPress	    ; initialize Mode 2
 
-    ; Handle red button press
+ModeThree
+    bsf Mode,3
+    goto waitPress	    ; initialize Mode 3
+
+ModeFour
+    bsf Mode,4
+    goto waitPress	    ; initialize Mode 4
+    
+
+
 RedPress
     call SwitchDelay         ; Debounce delay
     btfsc PORTC, 1           ; Check if red button is still pressed
@@ -68,14 +105,6 @@ RedRelease
     goto RedRelease          ; Loop here until red button is released
     goto TransistorToggle    ; Proceed to toggle transistor
 
-    ; Toggle the state of the transistor
-TransistorToggle
-    movf PORTD, W            ; Move the contents of PORTD to W register
-    xorlw 0x01               ; Toggle the least significant bit
-    movwf PORTD              ; Move the result back to PORTD
-    goto waitPress           ; Return to wait for button press
-
-    ; Delay routine for debouncing the switches
 SwitchDelay
     movlw 20                ; Load W with the delay count
     movwf Temp              ; Move W to Temp register
